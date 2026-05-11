@@ -20,63 +20,124 @@
       <div class="controls">
         <button id="profileBtn" class="conn-btn" title="Профиль">
           <span id="myAvatar">🙂</span>
+          <span id="myLevelBadge" class="level-badge hidden">1</span>
         </button>
-        <button id="themeBtn" class="conn-btn" title="Тема">🌙</button>
         <button id="soundBtn" class="conn-btn" title="Звук">🔊</button>
         <span id="connStatus" class="conn" title="Статус подключения">…</span>
       </div>
     </header>
 
-    <!-- Профиль modal -->
+    <!-- ═════════ MODAL: Профиль с вкладками ═════════ -->
     <div id="profileModal" class="modal-overlay hidden">
-      <div class="modal">
-        <h3>Профиль</h3>
-        <div class="profile-preview">
+      <div class="modal modal-wide">
+        <button class="modal-close" id="modalCloseBtn">✕</button>
+        <div class="profile-header">
           <div id="avatarPreview" class="avatar-big">🙂</div>
-          <div class="profile-name" id="profileNamePreview">Игрок</div>
+          <div class="profile-header-info">
+            <div class="profile-name" id="profileNamePreview">Игрок</div>
+            <div class="level-info">
+              <span class="level-label">Уровень <b id="levelDisplay">1</b></span>
+              <div class="xp-bar-wrap">
+                <div id="xpBar" class="xp-bar"></div>
+                <span id="xpText" class="xp-text">0 / 100</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <label class="field">
-          <span class="field-label">Имя</span>
-          <input id="profileName" class="text-input" type="text" maxlength="24" placeholder="Ваше имя" />
-        </label>
-        <div class="field">
-          <span class="field-label">Аватар</span>
-          <div id="avatarPicker" class="avatar-picker"></div>
+
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="profile">👤 Профиль</button>
+          <button class="tab-btn" data-tab="shop">🛍️ Аватары</button>
+          <button class="tab-btn" data-tab="themes">🎨 Темы</button>
+          <button class="tab-btn" data-tab="achievements">🏆 Достижения</button>
+          <button class="tab-btn" data-tab="friends">👥 Друзья</button>
+          <button class="tab-btn" data-tab="leaderboard">📊 Топ</button>
         </div>
-        <div class="field">
-          <span class="field-label">Цвет</span>
-          <div id="colorPicker" class="color-picker"></div>
+
+        <!-- Tab: profile -->
+        <div class="tab-panel active" data-panel="profile">
+          <label class="field">
+            <span class="field-label">Имя</span>
+            <input id="profileName" class="text-input" type="text" maxlength="24" placeholder="Ваше имя" />
+          </label>
+          <div class="field">
+            <span class="field-label">Цвет</span>
+            <div id="colorPicker" class="color-picker"></div>
+          </div>
+          <div class="profile-auth">
+            <div id="googleButtonHost"></div>
+            <button id="googleLogoutBtn" class="btn hidden">Выйти из Google</button>
+            <span id="googleStatus" class="muted" style="font-size:12px">Войдите, чтобы сохранить прогресс</span>
+          </div>
+          <button id="profileSave" class="btn btn-primary btn-block">💾 Сохранить</button>
         </div>
-        <div class="profile-auth">
-          <button id="googleLoginBtn" class="btn btn-google">Войти через Google</button>
-          <span id="googleStatus" class="muted" style="font-size:12px"></span>
+
+        <!-- Tab: shop -->
+        <div class="tab-panel" data-panel="shop">
+          <p class="panel-hint">Открывайте аватары за уровни и достижения</p>
+          <div id="shopGrid" class="shop-grid"></div>
         </div>
-        <div class="field-row">
-          <button id="profileSave" class="btn btn-primary btn-block">Сохранить</button>
-          <button id="profileCancel" class="btn">Отмена</button>
+
+        <!-- Tab: themes -->
+        <div class="tab-panel" data-panel="themes">
+          <p class="panel-hint">Разблокируйте темы оформления</p>
+          <div id="themesGrid" class="themes-grid"></div>
+        </div>
+
+        <!-- Tab: achievements -->
+        <div class="tab-panel" data-panel="achievements">
+          <div id="achievementsList" class="achievements-list"></div>
+        </div>
+
+        <!-- Tab: friends -->
+        <div class="tab-panel" data-panel="friends">
+          <div class="friends-search">
+            <input id="friendSearchInput" class="text-input" type="text" placeholder="Поиск игроков по имени…" />
+            <button id="friendSearchBtn" class="btn">🔍</button>
+          </div>
+          <div id="friendsSearchResults" class="friends-results"></div>
+          <h4 style="margin:10px 0 6px;font-size:14px;color:var(--muted)">Ваши друзья</h4>
+          <div id="friendsList" class="friends-results"></div>
+        </div>
+
+        <!-- Tab: leaderboard -->
+        <div class="tab-panel" data-panel="leaderboard">
+          <div class="leader-sort">
+            <button class="chip active" data-sort="wins">🏆 Победы</button>
+            <button class="chip" data-sort="level">⭐ Уровень</button>
+            <button class="chip" data-sort="streak">🔥 Серия</button>
+            <button class="chip" data-sort="cities">🗺️ Городов</button>
+            <button class="chip" data-sort="games">🎮 Партий</button>
+          </div>
+          <div id="leaderboardList" class="leaderboard-list"></div>
         </div>
       </div>
     </div>
 
-    <!-- Экран лобби -->
+    <!-- Achievement popup toast -->
+    <div id="achievementToast" class="achievement-toast hidden"></div>
+    <!-- Level-up toast -->
+    <div id="levelUpToast" class="achievement-toast hidden"></div>
+
+    <!-- ═════════ Экран лобби ═════════ -->
     <section id="lobbyScreen" class="screen">
       <div class="card welcome-card">
         <div class="welcome-text">
-          <h2 id="welcomeHi">Привет, Игрок!</h2>
-          <p class="muted">Создайте комнату или подключитесь к игре друзей</p>
+          <h2 id="welcomeHi">Привет!</h2>
+          <p class="muted">Создайте комнату или подключитесь к игре</p>
         </div>
-        <button id="editProfileBtn" class="btn">✏️ Изменить профиль</button>
+        <button id="editProfileBtn" class="btn">✏️ Профиль</button>
       </div>
 
       <div class="card">
-        <h2 class="card-title">Создать комнату</h2>
+        <h2 class="card-title">🚀 Создать комнату</h2>
         <div class="field-row">
           <label class="field">
             <span class="field-label">Игроков (2–32)</span>
             <input id="maxPlayers" class="text-input" type="number" min="2" max="32" value="4" />
           </label>
           <label class="field">
-            <span class="field-label">Таймер (сек)</span>
+            <span class="field-label">Таймер</span>
             <select id="turnTimer" class="text-input">
               <option value="0">Без лимита</option>
               <option value="30">30 сек</option>
@@ -98,19 +159,19 @@
         </div>
         <input id="passwordInput" class="text-input" type="text"
                placeholder="Пароль (только для закрытой)" disabled />
-        <button id="createBtn" class="btn btn-primary btn-block">🚀 Создать комнату</button>
+        <button id="createBtn" class="btn btn-primary btn-block">Создать</button>
       </div>
 
       <div class="card">
         <div class="card-title-row">
-          <h2 class="card-title">Открытые игры</h2>
+          <h2 class="card-title">🎮 Открытые игры</h2>
           <button id="refreshBtn" class="btn btn-ghost" type="button" title="Обновить">↻</button>
         </div>
         <div id="roomsList" class="rooms-list"></div>
         <div class="join-by-code">
-          <input id="codeInput" class="text-input" type="text" placeholder="Код комнаты"
+          <input id="codeInput" class="text-input" type="text" placeholder="Код"
                  maxlength="8" autocapitalize="characters" />
-          <input id="codePassword" class="text-input" type="text" placeholder="Пароль (если есть)" />
+          <input id="codePassword" class="text-input" type="text" placeholder="Пароль" />
           <button id="joinByCodeBtn" class="btn">Войти</button>
         </div>
       </div>
@@ -118,7 +179,7 @@
       <div id="lobbyMsg" class="message"></div>
     </section>
 
-    <!-- Экран комнаты -->
+    <!-- ═════════ Экран комнаты ═════════ -->
     <section id="roomScreen" class="screen hidden">
       <div class="room-head">
         <div class="room-meta">
@@ -126,12 +187,12 @@
           <div id="roomStatus" class="room-status">Ожидание</div>
         </div>
         <div class="room-actions">
-          <button id="shareBtn" class="btn" title="Поделиться ссылкой">📋</button>
+          <button id="shareBtn" class="btn" title="Поделиться">📋</button>
           <button id="startBtn" class="btn btn-primary hidden">Начать</button>
           <button id="extendBtn" class="btn hidden">+1 мин</button>
           <button id="rematchBtn" class="btn btn-primary hidden">🔄</button>
-          <button id="surrenderBtn" class="btn hidden">🏳️</button>
-          <button id="leaveBtn" class="btn">🚪</button>
+          <button id="surrenderBtn" class="btn hidden" title="Сдаться">🏳️</button>
+          <button id="leaveBtn" class="btn" title="Выйти">🚪</button>
         </div>
       </div>
 
@@ -141,10 +202,10 @@
         <span>Игра начнётся через <b id="autoStartTime">--</b></span>
       </div>
 
-      <!-- Status & Timer -->
+      <!-- Status + Timer -->
       <div class="room-status-card">
         <div class="letter-big">
-          <span class="label">Следующая буква</span>
+          <span class="label">Буква</span>
           <span id="mpLetter" class="next-letter">—</span>
         </div>
         <div id="timerDisplay" class="timer-display hidden">--</div>
@@ -153,7 +214,44 @@
 
       <div id="playersList" class="players-list"></div>
 
-      <main id="mpFeed" class="feed" aria-live="polite"></main>
+      <!-- Split: игра + чат -->
+      <div class="game-layout">
+        <main id="mpFeed" class="feed" aria-live="polite"></main>
+
+        <!-- Чат как колонна (desktop) / bottom sheet (mobile) -->
+        <aside id="chatPanel" class="chat-panel">
+          <div class="chat-header-bar">
+            <span>💬 Чат</span>
+            <button id="chatCloseBtn" class="chat-close">✕</button>
+          </div>
+          <div id="chatMessages" class="chat-messages"></div>
+          <div id="chatTyping" class="chat-typing hidden"></div>
+          <form id="chatForm" class="chat-input-row" autocomplete="off">
+            <button id="voiceBtn" class="chat-media-btn" type="button" title="Голос">🎤</button>
+            <button id="videoBtn" class="chat-media-btn" type="button" title="Кружок">🎥</button>
+            <input id="chatInput" type="text" placeholder="Сообщение…" maxlength="500" />
+            <button class="btn btn-primary chat-send-btn" type="submit">↑</button>
+          </form>
+          <div id="recordingBar" class="recording-bar hidden">
+            <span class="recording-dot"></span>
+            <span id="recordingTime">0:00</span>
+            <span class="recording-label">🎤 Запись…</span>
+            <button id="recordCancel" class="btn">✕</button>
+            <button id="recordSend" class="btn btn-primary">↑</button>
+          </div>
+          <div id="videoPreviewBar" class="video-preview-bar hidden">
+            <video id="videoPreview" muted autoplay playsinline></video>
+            <span id="videoRecTime">0:00</span>
+            <button id="videoCancel" class="btn">✕</button>
+            <button id="videoSend" class="btn btn-primary">↑</button>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Toggle для чата на мобилке -->
+      <button id="chatFab" class="chat-fab" title="Чат">
+        💬<span id="chatBadge" class="chat-badge hidden">0</span>
+      </button>
 
       <footer class="composer">
         <form id="mpForm" class="input-row" autocomplete="off">
@@ -178,46 +276,9 @@
         <button class="emoji-btn" data-emoji="❤️">❤️</button>
       </div>
 
-      <!-- Чат -->
-      <div class="chat-section">
-        <div class="chat-header" id="chatToggle">
-          <span>💬 Чат</span>
-          <span id="chatBadge" class="chat-badge hidden">0</span>
-          <span id="chatArrow" class="chat-arrow">▼</span>
-        </div>
-        <div id="chatBody" class="chat-body hidden">
-          <div id="chatMessages" class="chat-messages"></div>
-          <div id="chatTyping" class="chat-typing hidden"></div>
-          <form id="chatForm" class="chat-input-row" autocomplete="off">
-            <button id="voiceBtn" class="btn chat-media-btn" type="button" title="Голосовое">🎤</button>
-            <button id="videoBtn" class="btn chat-media-btn" type="button" title="Кружок">🎥</button>
-            <input id="chatInput" type="text" placeholder="Сообщение…"
-                   maxlength="500" autocomplete="off" />
-            <button class="btn btn-primary chat-send-btn" type="submit">↑</button>
-          </form>
-          <!-- Voice recording UI -->
-          <div id="recordingBar" class="recording-bar hidden">
-            <span class="recording-dot"></span>
-            <span id="recordingTime">0:00</span>
-            <span class="recording-label" id="recordingLabel">Запись голоса…</span>
-            <button id="recordCancel" class="btn">Отмена</button>
-            <button id="recordSend" class="btn btn-primary">Отправить</button>
-          </div>
-          <!-- Video preview -->
-          <div id="videoPreviewBar" class="video-preview-bar hidden">
-            <video id="videoPreview" muted autoplay playsinline></video>
-            <span id="videoRecTime">0:00</span>
-            <button id="videoCancel" class="btn">Отмена</button>
-            <button id="videoSend" class="btn btn-primary">Отправить</button>
-          </div>
-        </div>
-      </div>
-
       <div id="emojiFloats" class="emoji-floats"></div>
     </section>
   </div>
-
-  <input id="nameInput" type="hidden" value="" />
 
   <script src="multi.js"></script>
 </body>

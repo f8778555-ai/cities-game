@@ -20,6 +20,13 @@ import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 import { RoomManager } from "./rooms.mjs";
 import { size as citiesSize } from "./cities_db.mjs";
+import * as DB from "./db.mjs";
+import { ACHIEVEMENTS, checkAchievements } from "./achievements.mjs";
+import { verifyGoogleIdToken } from "./google_auth.mjs";
+import { SHOP_AVATARS, getShopForUser, isAvatarUnlocked } from "./shop.mjs";
+import { THEMES, getThemesForUser, isThemeUnlocked } from "./themes.mjs";
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "..", "public");
@@ -39,6 +46,190 @@ const MIME = {
 };
 
 const rooms = new RoomManager();
+
+// ── HTTP helpers ─────────────────────────────────────────────────────
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  const map = {};
+  for (const part of header.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k) map[k] = decodeURIComponent(rest.join("="));
+  }
+  return map;
+}
+
+function setSessionCookie(res, token) {
+  const cookie = `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`;
+  res.setHeader("Set-Cookie", cookie);
+}
+
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0");
+}
+
+async function readJSONBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (c) => { size += c.length; if (size > 100_000) { req.destroy(); reject(new Error("too large")); return; } chunks.push(c); });
+    req.on("end", () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")); }
+      catch (e) { reject(e); }
+    });
+    req.on("error", reject);
+  });
+}
+
+function jsonResponse(res, code, data) {
+  res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(data));
+}
+
+function getUserFromReq(req) {
+  const cookies = parseCookies(req);
+  return DB.getSessionUser(cookies.session);
+}
+
+function userPublic(u) {
+  if (!u) return null;
+  return {
+    id: u.id,
+    name: u.name,
+    avatar: u.avatar,
+    color: u.color,
+    theme: u.theme || "dark",
+    email: u.email || null,
+    isGoogle: !!u.googleSub,
+    level: u.level || 1,
+    xp: u.xp || 0,
+    xpToNext: DB.xpToNextLevel(u.level || 1),
+    friends: Object.keys(u.friends || {}).length,
+    unlockedAvatars: u.unlockedAvatars || {},
+    stats: u.stats,
+    achievements: u.achievements,
+  };
+}
+
+async function handleGoogleAuth(req, res) {
+  try {
+    const body = await readJSONBody(req);
+    const token = body.credential;
+    if (!token) return jsonResponse(res, 400, { error: "no token" });
+    const payload = await verifyGoogleIdToken(token, GOOGLE_CLIENT_ID || null);
+    const user = DB.linkOrCreateGoogleUser({
+      sub: payload.sub,
+      email: payload.email,
+      name: payload.name || payload.given_name || "Игрок",
+      picture: payload.picture,
+    });
+    // Проверяем достижения после входа через гугл
+    const unlocked = checkAchievements(user, DB.unlockAchievement);
+    const sessionToken = DB.createSession(user.id);
+    setSessionCookie(res, sessionToken);
+    jsonResponse(res, 200, { user: userPublic(user), newAchievements: unlocked });
+  } catch (e) {
+    console.error("google auth error:", e.message);
+    jsonResponse(res, 401, { error: "invalid token: " + e.message });
+  }
+}
+
+function handleLogout(req, res) {
+  const cookies = parseCookies(req);
+  if (cookies.session) DB.deleteSession(cookies.session);
+  clearSessionCookie(res);
+  jsonResponse(res, 200, { ok: true });
+}
+
+function handleMe(req, res) {
+  const u = getUserFromReq(req);
+  if (!u) return jsonResponse(res, 200, { user: null });
+  jsonResponse(res, 200, { user: userPublic(u) });
+}
+
+async function handleUpdateProfile(req, res) {
+  const u = getUserFromReq(req);
+  if (!u) return jsonResponse(res, 401, { error: "not authenticated" });
+  try {
+    const body = await readJSONBody(req);
+    // Проверяем что аватар разблокирован
+    if (body.avatar) {
+      const item = SHOP_AVATARS.find(a => a.emoji === body.avatar);
+      if (item && !isAvatarUnlocked(u, item)) {
+        return jsonResponse(res, 403, { error: "Avatar locked. Требуется уровень " + item.requireLevel });
+      }
+    }
+    if (body.theme) {
+      const t = THEMES.find(x => x.id === body.theme);
+      if (t && !isThemeUnlocked(u, t)) {
+        return jsonResponse(res, 403, { error: "Тема заблокирована (уровень " + t.requireLevel + ")" });
+      }
+    }
+    const updated = DB.updateUserProfile(u.id, body);
+    const unlocked = checkAchievements(updated, DB.unlockAchievement);
+    jsonResponse(res, 200, { user: userPublic(updated), newAchievements: unlocked });
+  } catch (e) {
+    jsonResponse(res, 400, { error: "bad request" });
+  }
+}
+
+function handleLeaderboard(req, res, url) {
+  const u = new URL(url, "http://x");
+  const sortBy = u.searchParams.get("sort") || "wins";
+  const limit = Math.min(100, Number(u.searchParams.get("limit")) || 50);
+  const list = DB.getLeaderboard(sortBy, limit);
+  jsonResponse(res, 200, { leaderboard: list, sortBy });
+}
+
+function handleShop(req, res) {
+  const u = getUserFromReq(req);
+  const shop = u ? getShopForUser(u) : SHOP_AVATARS.map(a => ({ ...a, unlocked: a.category === "basic" }));
+  jsonResponse(res, 200, { shop });
+}
+
+function handleThemes(req, res) {
+  const u = getUserFromReq(req);
+  const themes = u ? getThemesForUser(u) : THEMES.map(t => ({ ...t, unlocked: t.requireLevel <= 1 }));
+  jsonResponse(res, 200, { themes });
+}
+
+function handleFriendsList(req, res) {
+  const u = getUserFromReq(req);
+  if (!u) return jsonResponse(res, 401, { error: "not authenticated" });
+  jsonResponse(res, 200, { friends: DB.listFriends(u.id) });
+}
+
+async function handleFriendAdd(req, res) {
+  const u = getUserFromReq(req);
+  if (!u) return jsonResponse(res, 401, { error: "not authenticated" });
+  try {
+    const body = await readJSONBody(req);
+    const result = DB.addFriend(u.id, body.userId);
+    if (result.error) return jsonResponse(res, 400, { error: result.error });
+    jsonResponse(res, 200, { ok: true, friends: DB.listFriends(u.id) });
+  } catch {
+    jsonResponse(res, 400, { error: "bad request" });
+  }
+}
+
+async function handleFriendRemove(req, res) {
+  const u = getUserFromReq(req);
+  if (!u) return jsonResponse(res, 401, { error: "not authenticated" });
+  try {
+    const body = await readJSONBody(req);
+    const result = DB.removeFriend(u.id, body.userId);
+    if (result.error) return jsonResponse(res, 400, { error: result.error });
+    jsonResponse(res, 200, { ok: true, friends: DB.listFriends(u.id) });
+  } catch {
+    jsonResponse(res, 400, { error: "bad request" });
+  }
+}
+
+function handleUserSearch(req, res, url) {
+  const u = new URL(url, "http://x");
+  const q = u.searchParams.get("q") || "";
+  const users = DB.searchUsers(q, 20);
+  jsonResponse(res, 200, { users });
+}
 
 // ── HTTP ─────────────────────────────────────────────────────────────
 async function serveFile(res, absPath) {
@@ -81,6 +272,49 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ ok: true, cities: citiesSize(), rooms: rooms.rooms.size }));
     return;
   }
+  if (url === "/api/config") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ googleClientId: GOOGLE_CLIENT_ID }));
+    return;
+  }
+  if (url === "/api/achievements") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ achievements: ACHIEVEMENTS.map(a => ({ id: a.id, title: a.title, description: a.description, icon: a.icon })) }));
+    return;
+  }
+  if (url === "/api/auth/google" && req.method === "POST") {
+    return handleGoogleAuth(req, res);
+  }
+  if (url === "/api/auth/logout" && req.method === "POST") {
+    return handleLogout(req, res);
+  }
+  if (url === "/api/me") {
+    return handleMe(req, res);
+  }
+  if (url === "/api/me/profile" && req.method === "POST") {
+    return handleUpdateProfile(req, res);
+  }
+  if (url.startsWith("/api/leaderboard")) {
+    return handleLeaderboard(req, res, url);
+  }
+  if (url === "/api/shop") {
+    return handleShop(req, res);
+  }
+  if (url === "/api/themes") {
+    return handleThemes(req, res);
+  }
+  if (url === "/api/friends") {
+    return handleFriendsList(req, res);
+  }
+  if (url === "/api/friends/add" && req.method === "POST") {
+    return handleFriendAdd(req, res);
+  }
+  if (url === "/api/friends/remove" && req.method === "POST") {
+    return handleFriendRemove(req, res);
+  }
+  if (url.startsWith("/api/users/search")) {
+    return handleUserSearch(req, res, url);
+  }
 
   // статика
   const abs = safeResolve(url);
@@ -91,7 +325,7 @@ const server = createServer(async (req, res) => {
 // ── WebSocket ────────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws" });
 
-/** @type {Map<import('ws').WebSocket, {playerId:string, name:string, roomCode?:string}>} */
+/** @type {Map<import('ws').WebSocket, {playerId:string, name:string, roomCode?:string, userId?:string}>} */
 const clients = new Map();
 
 function send(ws, type, payload = {}) {
@@ -112,6 +346,36 @@ function broadcastRoom(room, type, payload = {}) {
 
 function pushRoomState(room) {
   broadcastRoom(room, "room:state", { room: room.snapshot() });
+  // Если игра завершилась — обновим БД для всех залогиненных игроков
+  if (room.status === "finished" && !room._recorded) {
+    room._recorded = true;
+    recordRoomFinish(room);
+  }
+}
+
+function recordRoomFinish(room) {
+  const playerIds = Array.from(room.players.keys());
+  for (const [ws, ctx] of clients) {
+    if (ctx.roomCode !== room.code) continue;
+    if (!ctx.userId) continue;
+    const user = DB.getUserById(ctx.userId);
+    if (!user) continue;
+    const won = room.winnerId === ctx.playerId;
+    const citiesPlayed = room.history.filter(h => h.playerId === ctx.playerId).map(h => h.city);
+    const opponents = playerIds.filter(id => id !== ctx.playerId);
+    const result = DB.recordGameResult(ctx.userId, { won, citiesPlayed, opponents });
+    if (result) {
+      const unlocked = checkAchievements(result.user, DB.unlockAchievement);
+      if (unlocked.length > 0) {
+        send(ws, "achievements:unlocked", { achievements: unlocked });
+      }
+      if (result.leveledUp) {
+        send(ws, "level:up", { level: result.user.level, xp: result.user.xp, xpToNext: DB.xpToNextLevel(result.user.level) });
+      }
+      send(ws, "xp:gained", { xpGained: result.xpGained });
+      send(ws, "user:update", { user: userPublic(result.user) });
+    }
+  }
 }
 
 function broadcastLobby() {
@@ -154,10 +418,12 @@ function leaveRoom(ws) {
   }
 }
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   const playerId = randomUUID();
-  clients.set(ws, { playerId, name: "Игрок" });
-  send(ws, "hello", { playerId });
+  const cookies = parseCookies(req);
+  const user = DB.getSessionUser(cookies.session);
+  clients.set(ws, { playerId, name: user?.name || "Игрок", userId: user?.id });
+  send(ws, "hello", { playerId, user: user ? userPublic(user) : null });
   send(ws, "lobby:update", { rooms: rooms.publicList() });
 
   ws.on("message", (raw) => {
@@ -363,6 +629,7 @@ function handleMessage(ws, msg) {
       if (!room) return send(ws, "error", { message: "Вы не в комнате." });
       const result = room.rematch(ctx.playerId);
       if (result.error) return send(ws, "error", { message: result.error });
+      room._recorded = false;
       broadcastRoom(room, "chat:system", { text: "🔄 Новая партия!" });
       pushRoomState(room);
       rooms.notifyLobby();
