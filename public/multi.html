@@ -43,9 +43,47 @@
               <option value="8">8</option>
             </select>
           </label>
+          <label class="field">
+            <span class="field-label">Таймер (сек)</span>
+            <select id="turnTimer" class="text-input">
+              <option value="0">Без лимита</option>
+              <option value="30">30 сек</option>
+              <option value="60" selected>60 сек</option>
+              <option value="90">90 сек</option>
+              <option value="120">2 мин</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Партий</span>
+            <select id="totalRounds" class="text-input">
+              <option value="1" selected>1 (до победы)</option>
+              <option value="3">До 2 из 3</option>
+              <option value="5">До 3 из 5</option>
+              <option value="7">До 4 из 7</option>
+              <option value="9">До 5 из 9</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field check">
+            <input id="hintsCheck" type="checkbox" checked />
+            <span>Подсказки</span>
+          </label>
           <label class="field check">
             <input id="isPrivate" type="checkbox" />
             <span>Закрытая</span>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">Ожидание дисконнекта</span>
+            <select id="disconnectTimeout" class="text-input">
+              <option value="0">Бесконечно</option>
+              <option value="60">1 мин</option>
+              <option value="120">2 мин</option>
+              <option value="300" selected>5 мин</option>
+              <option value="600">10 мин</option>
+            </select>
           </label>
         </div>
         <input id="passwordInput" class="text-input" type="text"
@@ -75,10 +113,14 @@
       <div class="room-head">
         <div class="room-meta">
           <div class="room-code">Код <b id="roomCode">—</b></div>
+          <div id="roundInfo" class="room-status hidden"></div>
           <div id="roomStatus" class="room-status">Ожидание</div>
         </div>
         <div class="room-actions">
+          <button id="shareBtn" class="btn" title="Поделиться ссылкой">📋 Ссылка</button>
           <button id="startBtn" class="btn btn-primary hidden">Начать</button>
+          <button id="nextRoundBtn" class="btn btn-primary hidden">▶️ Следующая партия</button>
+          <button id="rematchBtn" class="btn btn-primary hidden">🔄 Новая серия</button>
           <button id="surrenderBtn" class="btn hidden">Сдаться</button>
           <button id="leaveBtn" class="btn">Выйти</button>
         </div>
@@ -89,6 +131,7 @@
           <span class="label">Ход — город на букву</span>
           <span id="mpLetter" class="next-letter">—</span>
         </div>
+        <div id="timerDisplay" class="timer-display hidden">--</div>
         <div id="turnIndicator" class="turn-indicator">—</div>
       </div>
 
@@ -101,10 +144,21 @@
           <input id="mpInput" name="city" type="text" placeholder="Введите город…"
                  autocomplete="off" autocorrect="off" autocapitalize="words"
                  spellcheck="false" inputmode="text" enterkeyhint="send" disabled />
+          <button id="hintBtn" class="btn hidden" type="button" title="Подсказка">💡</button>
           <button id="mpSendBtn" class="btn btn-primary" type="submit" disabled>Ход</button>
         </form>
         <div id="mpMessage" class="message"></div>
       </footer>
+
+      <!-- Эмодзи-реакции -->
+      <div class="emoji-bar">
+        <button class="emoji-btn" data-emoji="👍">👍</button>
+        <button class="emoji-btn" data-emoji="🔥">🔥</button>
+        <button class="emoji-btn" data-emoji="😂">😂</button>
+        <button class="emoji-btn" data-emoji="😮">😮</button>
+        <button class="emoji-btn" data-emoji="👏">👏</button>
+        <button class="emoji-btn" data-emoji="💀">💀</button>
+      </div>
 
       <!-- Чат -->
       <div class="chat-section">
@@ -122,6 +176,9 @@
           </form>
         </div>
       </div>
+
+      <!-- Всплывающие эмодзи -->
+      <div id="emojiFloats" class="emoji-floats"></div>
     </section>
   </div>
 
