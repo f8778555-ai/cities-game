@@ -121,12 +121,14 @@ function leaveRoom(ws) {
   if (!ctx || !ctx.roomCode) return;
   const room = rooms.get(ctx.roomCode);
   const wasCode = ctx.roomCode;
+  const wasName = ctx.name;
   ctx.roomCode = undefined;
   if (!room) return;
   room.removePlayer(ctx.playerId);
   if (room.players.size === 0) {
     rooms.remove(wasCode);
   } else {
+    broadcastRoom(room, "chat:system", { text: `${wasName} покинул комнату` });
     pushRoomState(room);
     rooms.notifyLobby();
   }
@@ -189,6 +191,7 @@ function handleMessage(ws, msg) {
       ctx.roomCode = room.code;
       send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId });
       pushRoomState(room);
+      broadcastRoom(room, "chat:system", { text: `${ctx.name} присоединился к комнате` });
       rooms.notifyLobby();
       break;
     }
@@ -231,6 +234,15 @@ function handleMessage(ws, msg) {
       if (result.error) return send(ws, "error", { message: result.error });
       pushRoomState(room);
       rooms.notifyLobby();
+      break;
+    }
+
+    case "chat:message": {
+      const room = rooms.get(ctx.roomCode);
+      if (!room) return send(ws, "error", { message: "Вы не в комнате." });
+      const text = String(msg.text || "").trim().slice(0, 200);
+      if (!text) return;
+      broadcastRoom(room, "chat:message", { name: ctx.name, text });
       break;
     }
 

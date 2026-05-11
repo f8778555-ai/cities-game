@@ -105,6 +105,23 @@
         </form>
         <div id="mpMessage" class="message"></div>
       </footer>
+
+      <!-- Чат -->
+      <div class="chat-section">
+        <div class="chat-header" id="chatToggle">
+          <span>💬 Чат</span>
+          <span id="chatBadge" class="chat-badge hidden">0</span>
+          <span id="chatArrow" class="chat-arrow">▼</span>
+        </div>
+        <div id="chatBody" class="chat-body hidden">
+          <div id="chatMessages" class="chat-messages"></div>
+          <form id="chatForm" class="chat-input-row" autocomplete="off">
+            <input id="chatInput" type="text" placeholder="Сообщение…"
+                   maxlength="200" autocomplete="off" />
+            <button class="btn btn-primary" type="submit">↑</button>
+          </form>
+        </div>
+      </div>
     </section>
   </div>
 

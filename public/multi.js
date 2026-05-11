@@ -152,6 +152,14 @@
         if (!roomScreen.classList.contains("hidden")) setRoomMsg(msg.message, "error");
         else setLobbyMsg(msg.message, "error");
         break;
+
+      case "chat:message":
+        addChatMessage(msg.name, msg.text, false);
+        break;
+
+      case "chat:system":
+        addChatMessage("", msg.text, true);
+        break;
     }
   }
 
@@ -329,6 +337,56 @@
   mpInput.addEventListener("input", () => {
     if (mpMessage.classList.contains("error")) setRoomMsg("");
   });
+
+  // ── chat ──────────────────────────────────────────────────
+  const chatToggle   = $("chatToggle");
+  const chatBody     = $("chatBody");
+  const chatMessages = $("chatMessages");
+  const chatForm     = $("chatForm");
+  const chatInput    = $("chatInput");
+  const chatBadge    = $("chatBadge");
+  const chatArrow    = $("chatArrow");
+
+  let chatOpen = false;
+  let unreadCount = 0;
+
+  chatToggle.addEventListener("click", () => {
+    chatOpen = !chatOpen;
+    chatBody.classList.toggle("hidden", !chatOpen);
+    chatArrow.textContent = chatOpen ? "▲" : "▼";
+    if (chatOpen) {
+      unreadCount = 0;
+      chatBadge.classList.add("hidden");
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      chatInput.focus();
+    }
+  });
+
+  chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    send("chat:message", { text });
+    chatInput.value = "";
+  });
+
+  function addChatMessage(name, text, isSystem) {
+    const el = document.createElement("div");
+    el.className = "chat-msg" + (isSystem ? " system" : "");
+    if (isSystem) {
+      el.textContent = text;
+    } else {
+      el.innerHTML = `<b>${escapeHtml(name)}</b>: ${escapeHtml(text)}`;
+    }
+    chatMessages.appendChild(el);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    if (!chatOpen) {
+      unreadCount++;
+      chatBadge.textContent = unreadCount > 99 ? "99+" : unreadCount;
+      chatBadge.classList.remove("hidden");
+    }
+  }
 
   // ── init ──────────────────────────────────────────────────
   setConnStatus(false, "соединение…");
