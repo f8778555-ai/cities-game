@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: cities-game
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server/server.mjs
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0

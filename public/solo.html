@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1b2a4a" />
+  <meta name="description" content="Игра Города с ИИ. Играй с компьютером онлайн, с телефона или ПК." />
+  <title>Города · игра с ИИ</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <a href="/" class="brand-link" title="В меню">
+          <span class="logo">🏙️</span>
+          <h1>Города</h1>
+        </a>
+      </div>
+      <div class="controls">
+        <label class="diff">
+          Сложность
+          <select id="difficulty">
+            <option value="easy">Лёгкая</option>
+            <option value="medium" selected>Средняя</option>
+            <option value="hard">Сложная</option>
+          </select>
+        </label>
+        <button id="restart" class="btn btn-ghost" type="button" title="Новая игра">↻</button>
+      </div>
+    </header>
+
+    <section class="status">
+      <div class="status-card">
+        <span class="label">Ваш ход — город на букву</span>
+        <span id="nextLetter" class="next-letter">—</span>
+      </div>
+      <div class="score">
+        <div class="score-item you">
+          <span class="score-label">Вы</span>
+          <span id="scoreYou" class="score-val">0</span>
+        </div>
+        <div class="score-item ai">
+          <span class="score-label">ИИ</span>
+          <span id="scoreAi" class="score-val">0</span>
+        </div>
+      </div>
+    </section>
+
+    <main id="feed" class="feed" aria-live="polite">
+      <div class="hint-card" id="intro">
+        <p>Называйте города по очереди. Каждый следующий начинается с той буквы, на которую закончился предыдущий.</p>
+        <p class="muted">Буквы <b>ъ ь ы й</b> на конце пропускаются — берём предпоследнюю.</p>
+      </div>
+    </main>
+
+    <footer class="composer">
+      <form id="form" class="input-row" autocomplete="off">
+        <input
+          id="input"
+          name="city"
+          type="text"
+          placeholder="Введите город…"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="words"
+          spellcheck="false"
+          inputmode="text"
+          enterkeyhint="send"
+        />
+        <button id="hintBtn" class="btn btn-ghost" type="button" title="Подсказка">💡</button>
+        <button id="sendBtn" class="btn btn-primary" type="submit">Ход</button>
+      </form>
+      <div id="message" class="message" role="status"></div>
+    </footer>
+  </div>
+
+  <script src="cities.js"></script>
+  <script src="ai.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

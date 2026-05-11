@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1b2a4a" />
+  <title>Города — игра с друзьями</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <a href="/" class="brand-link">
+          <span class="logo">🏙️</span>
+          <h1>Города</h1>
+        </a>
+      </div>
+      <div class="controls">
+        <span id="connStatus" class="conn" title="Статус подключения">…</span>
+      </div>
+    </header>
+
+    <!-- Экран лобби -->
+    <section id="lobbyScreen" class="screen">
+      <div class="card">
+        <h2 class="card-title">Ваше имя</h2>
+        <input id="nameInput" class="text-input" type="text" maxlength="24"
+               placeholder="Как вас называть" autocomplete="nickname" />
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Создать комнату</h2>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">Игроков</span>
+            <select id="maxPlayers" class="text-input">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+          <label class="field check">
+            <input id="isPrivate" type="checkbox" />
+            <span>Закрытая</span>
+          </label>
+        </div>
+        <input id="passwordInput" class="text-input" type="text"
+               placeholder="Пароль (только для закрытой)" disabled />
+        <button id="createBtn" class="btn btn-primary btn-block">Создать комнату</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title-row">
+          <h2 class="card-title">Открытые игры</h2>
+          <button id="refreshBtn" class="btn btn-ghost" type="button" title="Обновить">↻</button>
+        </div>
+        <div id="roomsList" class="rooms-list"></div>
+        <div class="join-by-code">
+          <input id="codeInput" class="text-input" type="text" placeholder="Код комнаты"
+                 maxlength="8" autocapitalize="characters" />
+          <input id="codePassword" class="text-input" type="text" placeholder="Пароль (если есть)" />
+          <button id="joinByCodeBtn" class="btn">Подключиться</button>
+        </div>
+      </div>
+
+      <div id="lobbyMsg" class="message"></div>
+    </section>
+
+    <!-- Экран комнаты -->
+    <section id="roomScreen" class="screen hidden">
+      <div class="room-head">
+        <div class="room-meta">
+          <div class="room-code">Код <b id="roomCode">—</b></div>
+          <div id="roomStatus" class="room-status">Ожидание</div>
+        </div>
+        <div class="room-actions">
+          <button id="startBtn" class="btn btn-primary hidden">Начать</button>
+          <button id="surrenderBtn" class="btn hidden">Сдаться</button>
+          <button id="leaveBtn" class="btn">Выйти</button>
+        </div>
+      </div>
+
+      <div class="room-status-card">
+        <div>
+          <span class="label">Ход — город на букву</span>
+          <span id="mpLetter" class="next-letter">—</span>
+        </div>
+        <div id="turnIndicator" class="turn-indicator">—</div>
+      </div>
+
+      <div id="playersList" class="players-list"></div>
+
+      <main id="mpFeed" class="feed" aria-live="polite"></main>
+
+      <footer class="composer">
+        <form id="mpForm" class="input-row" autocomplete="off">
+          <input id="mpInput" name="city" type="text" placeholder="Введите город…"
+                 autocomplete="off" autocorrect="off" autocapitalize="words"
+                 spellcheck="false" inputmode="text" enterkeyhint="send" disabled />
+          <button id="mpSendBtn" class="btn btn-primary" type="submit" disabled>Ход</button>
+        </form>
+        <div id="mpMessage" class="message"></div>
+      </footer>
+    </section>
+  </div>
+
+  <script src="multi.js"></script>
+</body>
+</html>
