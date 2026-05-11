@@ -1,0 +1,23 @@
+{
+  "name": "Города",
+  "short_name": "Города",
+  "description": "Игра в города с ИИ и мультиплеером",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1629",
+  "theme_color": "#1b2a4a",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%231b2a4a'/><text x='50%25' y='50%25' text-anchor='middle' dy='.35em' font-size='120'>🏙️</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='85' fill='%231b2a4a'/><text x='50%25' y='50%25' text-anchor='middle' dy='.35em' font-size='320'>🏙️</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

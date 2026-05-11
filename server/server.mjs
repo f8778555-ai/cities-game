@@ -102,6 +102,12 @@ function broadcastRoom(room, type, payload = {}) {
   for (const [ws, ctx] of clients) {
     if (ctx.roomCode === room.code) send(ws, type, payload);
   }
+  // Сохраняем системные и эмодзи сообщения в лог
+  if (type === "chat:system") {
+    room.chatLog = room.chatLog || [];
+    room.chatLog.push({ kind: "system", text: payload.text, at: Date.now() });
+    if (room.chatLog.length > 200) room.chatLog.shift();
+  }
 }
 
 function pushRoomState(room) {
@@ -115,6 +121,19 @@ function broadcastLobby() {
   }
 }
 rooms.onLobbyChange(broadcastLobby);
+
+function ensureRoomCallbacks(room) {
+  if (!room._onTimerExpire) {
+    room._onTimerExpire = () => { pushRoomState(room); rooms.notifyLobby(); };
+  }
+  if (!room._onAutoStart) {
+    room._onAutoStart = (reason) => {
+      broadcastRoom(room, "chat:system", { text: reason === "full" ? "🎮 Все собрались — игра началась!" : "⏱ Время ожидания истекло — игра началась!" });
+      pushRoomState(room);
+      rooms.notifyLobby();
+    };
+  }
+}
 
 function leaveRoom(ws) {
   const ctx = clients.get(ws);
@@ -174,17 +193,19 @@ function handleMessage(ws, msg) {
         turnTimer: msg.turnTimer || 0,
         hints: !!msg.hints,
         disconnectTimeout: msg.disconnectTimeout || 0,
-        totalRounds: msg.totalRounds || 1,
       });
       ctx.name = String(msg.name || "Игрок").slice(0, 24);
-      room.addPlayer({ id: ctx.playerId, name: ctx.name });
+      ctx.avatar = String(msg.avatar || "🙂").slice(0, 4);
+      ctx.color = String(msg.color || "#6ea8ff").slice(0, 16);
+      room.addPlayer({ id: ctx.playerId, name: ctx.name, avatar: ctx.avatar, color: ctx.color });
       ctx.roomCode = room.code;
-      // Set timer callback
-      room._onTimerExpire = (type, pid) => {
+      room._onTimerExpire = () => { pushRoomState(room); rooms.notifyLobby(); };
+      room._onAutoStart = (reason) => {
+        broadcastRoom(room, "chat:system", { text: reason === "full" ? "🎮 Все собрались — игра началась!" : "⏱ Время ожидания истекло — игра началась!" });
         pushRoomState(room);
         rooms.notifyLobby();
       };
-      send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId });
+      send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId, chatLog: room.chatLog });
       rooms.notifyLobby();
       break;
     }
@@ -193,16 +214,22 @@ function handleMessage(ws, msg) {
       if (ctx.roomCode) return send(ws, "error", { message: "Вы уже в комнате." });
       const room = rooms.get(msg.code);
       if (!room) return send(ws, "error", { message: "Комната не найдена." });
+      if (room.isKicked(ctx.playerId)) return send(ws, "error", { message: "Вы были исключены из этой комнаты." });
       if (!room.checkPassword(msg.password)) return send(ws, "error", { message: "Неверный пароль." });
+      ensureRoomCallbacks(room);
       ctx.name = String(msg.name || "Игрок").slice(0, 24);
+      ctx.avatar = String(msg.avatar || "🙂").slice(0, 4);
+      ctx.color = String(msg.color || "#6ea8ff").slice(0, 16);
       // Реконнект — если игрок уже есть в комнате (вернулся)
       const existingPlayer = room.players.get(ctx.playerId);
       if (existingPlayer) {
         existingPlayer.connected = true;
         existingPlayer.name = ctx.name;
+        existingPlayer.avatar = ctx.avatar;
+        existingPlayer.color = ctx.color;
         room._clearDisconnectTimer(ctx.playerId);
         ctx.roomCode = room.code;
-        send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId });
+        send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId, chatLog: room.chatLog });
         broadcastRoom(room, "chat:system", { text: `${ctx.name} вернулся в игру` });
         pushRoomState(room);
         return;
@@ -210,9 +237,9 @@ function handleMessage(ws, msg) {
       // Новый игрок
       if (room.status !== "waiting") return send(ws, "error", { message: "Игра уже идёт." });
       if (room.isFull()) return send(ws, "error", { message: "В комнате нет свободных мест." });
-      room.addPlayer({ id: ctx.playerId, name: ctx.name });
+      room.addPlayer({ id: ctx.playerId, name: ctx.name, avatar: ctx.avatar, color: ctx.color });
       ctx.roomCode = room.code;
-      send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId });
+      send(ws, "room:joined", { room: room.snapshot(), you: ctx.playerId, chatLog: room.chatLog });
       pushRoomState(room);
       broadcastRoom(room, "chat:system", { text: `${ctx.name} присоединился к комнате` });
       rooms.notifyLobby();
@@ -273,12 +300,52 @@ function handleMessage(ws, msg) {
       break;
     }
 
+    case "room:extendAutoStart": {
+      const room = rooms.get(ctx.roomCode);
+      if (!room) return send(ws, "error", { message: "Вы не в комнате." });
+      const result = room.extendAutoStart(ctx.playerId, msg.seconds || 60);
+      if (result.error) return send(ws, "error", { message: result.error });
+      broadcastRoom(room, "chat:system", { text: `⏱ Хост добавил ещё время ожидания (+${msg.seconds || 60}с)` });
+      pushRoomState(room);
+      break;
+    }
+
     case "chat:message": {
       const room = rooms.get(ctx.roomCode);
       if (!room) return send(ws, "error", { message: "Вы не в комнате." });
-      const text = String(msg.text || "").trim().slice(0, 200);
+      const text = String(msg.text || "").trim().slice(0, 500);
       if (!text) return;
-      broadcastRoom(room, "chat:message", { name: ctx.name, text });
+      const entry = { kind: "text", name: ctx.name, playerId: ctx.playerId, text, at: Date.now() };
+      room.chatLog.push(entry);
+      if (room.chatLog.length > 200) room.chatLog.shift();
+      broadcastRoom(room, "chat:message", entry);
+      break;
+    }
+
+    case "chat:voice": {
+      const room = rooms.get(ctx.roomCode);
+      if (!room) return send(ws, "error", { message: "Вы не в комнате." });
+      // msg.data — base64 аудио (ограничим ~500KB)
+      const data = String(msg.data || "");
+      if (!data || data.length > 700000) return send(ws, "error", { message: "Файл слишком большой." });
+      const duration = Math.max(0, Math.min(60, Number(msg.duration) || 0));
+      const entry = { kind: "voice", name: ctx.name, playerId: ctx.playerId, data, duration, at: Date.now() };
+      room.chatLog.push(entry);
+      if (room.chatLog.length > 200) room.chatLog.shift();
+      broadcastRoom(room, "chat:voice", entry);
+      break;
+    }
+
+    case "chat:video": {
+      const room = rooms.get(ctx.roomCode);
+      if (!room) return send(ws, "error", { message: "Вы не в комнате." });
+      const data = String(msg.data || "");
+      if (!data || data.length > 2000000) return send(ws, "error", { message: "Файл слишком большой." });
+      const duration = Math.max(0, Math.min(30, Number(msg.duration) || 0));
+      const entry = { kind: "video", name: ctx.name, playerId: ctx.playerId, data, duration, at: Date.now() };
+      room.chatLog.push(entry);
+      if (room.chatLog.length > 200) room.chatLog.shift();
+      broadcastRoom(room, "chat:video", entry);
       break;
     }
 
@@ -296,20 +363,41 @@ function handleMessage(ws, msg) {
       if (!room) return send(ws, "error", { message: "Вы не в комнате." });
       const result = room.rematch(ctx.playerId);
       if (result.error) return send(ws, "error", { message: result.error });
-      broadcastRoom(room, "chat:system", { text: "🔄 Новая серия!" });
+      broadcastRoom(room, "chat:system", { text: "🔄 Новая партия!" });
       pushRoomState(room);
       rooms.notifyLobby();
       break;
     }
 
-    case "room:nextRound": {
+    case "room:kick": {
       const room = rooms.get(ctx.roomCode);
       if (!room) return send(ws, "error", { message: "Вы не в комнате." });
-      const result = room.nextRound(ctx.playerId);
+      const result = room.kickPlayer(ctx.playerId, msg.targetId);
       if (result.error) return send(ws, "error", { message: result.error });
-      broadcastRoom(room, "chat:system", { text: `▶️ Партия ${room.currentRound} из ${room.totalRounds}` });
+      // Найти сокет игрока и закрыть/удалить
+      for (const [clientWs, clientCtx] of clients) {
+        if (clientCtx.playerId === msg.targetId && clientCtx.roomCode === room.code) {
+          send(clientWs, "room:kicked", { message: "Вас исключили из комнаты." });
+          clientCtx.roomCode = undefined;
+          break;
+        }
+      }
+      room.removePlayer(msg.targetId);
+      broadcastRoom(room, "chat:system", { text: `${result.targetName} исключён хостом` });
       pushRoomState(room);
       rooms.notifyLobby();
+      break;
+    }
+
+    case "chat:typing": {
+      const room = rooms.get(ctx.roomCode);
+      if (!room) return;
+      // Рассылаем всем кроме отправителя
+      for (const [otherWs, otherCtx] of clients) {
+        if (otherCtx.roomCode === room.code && otherWs !== ws) {
+          send(otherWs, "chat:typing", { name: ctx.name, playerId: ctx.playerId });
+        }
+      }
       break;
     }
 

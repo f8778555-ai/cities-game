@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#1b2a4a" />
   <title>Города — игра с друзьями</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.json" />
 </head>
 <body>
   <div class="app">
@@ -17,31 +18,62 @@
         </a>
       </div>
       <div class="controls">
+        <button id="profileBtn" class="conn-btn" title="Профиль">
+          <span id="myAvatar">🙂</span>
+        </button>
+        <button id="themeBtn" class="conn-btn" title="Тема">🌙</button>
+        <button id="soundBtn" class="conn-btn" title="Звук">🔊</button>
         <span id="connStatus" class="conn" title="Статус подключения">…</span>
       </div>
     </header>
 
+    <!-- Профиль modal -->
+    <div id="profileModal" class="modal-overlay hidden">
+      <div class="modal">
+        <h3>Профиль</h3>
+        <div class="profile-preview">
+          <div id="avatarPreview" class="avatar-big">🙂</div>
+          <div class="profile-name" id="profileNamePreview">Игрок</div>
+        </div>
+        <label class="field">
+          <span class="field-label">Имя</span>
+          <input id="profileName" class="text-input" type="text" maxlength="24" placeholder="Ваше имя" />
+        </label>
+        <div class="field">
+          <span class="field-label">Аватар</span>
+          <div id="avatarPicker" class="avatar-picker"></div>
+        </div>
+        <div class="field">
+          <span class="field-label">Цвет</span>
+          <div id="colorPicker" class="color-picker"></div>
+        </div>
+        <div class="profile-auth">
+          <button id="googleLoginBtn" class="btn btn-google">Войти через Google</button>
+          <span id="googleStatus" class="muted" style="font-size:12px"></span>
+        </div>
+        <div class="field-row">
+          <button id="profileSave" class="btn btn-primary btn-block">Сохранить</button>
+          <button id="profileCancel" class="btn">Отмена</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Экран лобби -->
     <section id="lobbyScreen" class="screen">
-      <div class="card">
-        <h2 class="card-title">Ваше имя</h2>
-        <input id="nameInput" class="text-input" type="text" maxlength="24"
-               placeholder="Как вас называть" autocomplete="nickname" />
+      <div class="card welcome-card">
+        <div class="welcome-text">
+          <h2 id="welcomeHi">Привет, Игрок!</h2>
+          <p class="muted">Создайте комнату или подключитесь к игре друзей</p>
+        </div>
+        <button id="editProfileBtn" class="btn">✏️ Изменить профиль</button>
       </div>
 
       <div class="card">
         <h2 class="card-title">Создать комнату</h2>
         <div class="field-row">
           <label class="field">
-            <span class="field-label">Игроков</span>
-            <select id="maxPlayers" class="text-input">
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4" selected>4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-              <option value="8">8</option>
-            </select>
+            <span class="field-label">Игроков (2–32)</span>
+            <input id="maxPlayers" class="text-input" type="number" min="2" max="32" value="4" />
           </label>
           <label class="field">
             <span class="field-label">Таймер (сек)</span>
@@ -51,16 +83,6 @@
               <option value="60" selected>60 сек</option>
               <option value="90">90 сек</option>
               <option value="120">2 мин</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="field-label">Партий</span>
-            <select id="totalRounds" class="text-input">
-              <option value="1" selected>1 (до победы)</option>
-              <option value="3">До 2 из 3</option>
-              <option value="5">До 3 из 5</option>
-              <option value="7">До 4 из 7</option>
-              <option value="9">До 5 из 9</option>
             </select>
           </label>
         </div>
@@ -74,21 +96,9 @@
             <span>Закрытая</span>
           </label>
         </div>
-        <div class="field-row">
-          <label class="field">
-            <span class="field-label">Ожидание дисконнекта</span>
-            <select id="disconnectTimeout" class="text-input">
-              <option value="0">Бесконечно</option>
-              <option value="60">1 мин</option>
-              <option value="120">2 мин</option>
-              <option value="300" selected>5 мин</option>
-              <option value="600">10 мин</option>
-            </select>
-          </label>
-        </div>
         <input id="passwordInput" class="text-input" type="text"
                placeholder="Пароль (только для закрытой)" disabled />
-        <button id="createBtn" class="btn btn-primary btn-block">Создать комнату</button>
+        <button id="createBtn" class="btn btn-primary btn-block">🚀 Создать комнату</button>
       </div>
 
       <div class="card">
@@ -101,7 +111,7 @@
           <input id="codeInput" class="text-input" type="text" placeholder="Код комнаты"
                  maxlength="8" autocapitalize="characters" />
           <input id="codePassword" class="text-input" type="text" placeholder="Пароль (если есть)" />
-          <button id="joinByCodeBtn" class="btn">Подключиться</button>
+          <button id="joinByCodeBtn" class="btn">Войти</button>
         </div>
       </div>
 
@@ -112,23 +122,29 @@
     <section id="roomScreen" class="screen hidden">
       <div class="room-head">
         <div class="room-meta">
-          <div class="room-code">Код <b id="roomCode">—</b></div>
-          <div id="roundInfo" class="room-status hidden"></div>
+          <div class="room-code">🎮 <b id="roomCode">—</b></div>
           <div id="roomStatus" class="room-status">Ожидание</div>
         </div>
         <div class="room-actions">
-          <button id="shareBtn" class="btn" title="Поделиться ссылкой">📋 Ссылка</button>
+          <button id="shareBtn" class="btn" title="Поделиться ссылкой">📋</button>
           <button id="startBtn" class="btn btn-primary hidden">Начать</button>
-          <button id="nextRoundBtn" class="btn btn-primary hidden">▶️ Следующая партия</button>
-          <button id="rematchBtn" class="btn btn-primary hidden">🔄 Новая серия</button>
-          <button id="surrenderBtn" class="btn hidden">Сдаться</button>
-          <button id="leaveBtn" class="btn">Выйти</button>
+          <button id="extendBtn" class="btn hidden">+1 мин</button>
+          <button id="rematchBtn" class="btn btn-primary hidden">🔄</button>
+          <button id="surrenderBtn" class="btn hidden">🏳️</button>
+          <button id="leaveBtn" class="btn">🚪</button>
         </div>
       </div>
 
+      <!-- Автостарт -->
+      <div id="autoStartBar" class="autostart-bar hidden">
+        <span class="autostart-icon">⏱</span>
+        <span>Игра начнётся через <b id="autoStartTime">--</b></span>
+      </div>
+
+      <!-- Status & Timer -->
       <div class="room-status-card">
-        <div>
-          <span class="label">Ход — город на букву</span>
+        <div class="letter-big">
+          <span class="label">Следующая буква</span>
           <span id="mpLetter" class="next-letter">—</span>
         </div>
         <div id="timerDisplay" class="timer-display hidden">--</div>
@@ -150,7 +166,7 @@
         <div id="mpMessage" class="message"></div>
       </footer>
 
-      <!-- Эмодзи-реакции -->
+      <!-- Эмодзи -->
       <div class="emoji-bar">
         <button class="emoji-btn" data-emoji="👍">👍</button>
         <button class="emoji-btn" data-emoji="🔥">🔥</button>
@@ -158,6 +174,8 @@
         <button class="emoji-btn" data-emoji="😮">😮</button>
         <button class="emoji-btn" data-emoji="👏">👏</button>
         <button class="emoji-btn" data-emoji="💀">💀</button>
+        <button class="emoji-btn" data-emoji="🤔">🤔</button>
+        <button class="emoji-btn" data-emoji="❤️">❤️</button>
       </div>
 
       <!-- Чат -->
@@ -169,18 +187,37 @@
         </div>
         <div id="chatBody" class="chat-body hidden">
           <div id="chatMessages" class="chat-messages"></div>
+          <div id="chatTyping" class="chat-typing hidden"></div>
           <form id="chatForm" class="chat-input-row" autocomplete="off">
+            <button id="voiceBtn" class="btn chat-media-btn" type="button" title="Голосовое">🎤</button>
+            <button id="videoBtn" class="btn chat-media-btn" type="button" title="Кружок">🎥</button>
             <input id="chatInput" type="text" placeholder="Сообщение…"
-                   maxlength="200" autocomplete="off" />
-            <button class="btn btn-primary" type="submit">↑</button>
+                   maxlength="500" autocomplete="off" />
+            <button class="btn btn-primary chat-send-btn" type="submit">↑</button>
           </form>
+          <!-- Voice recording UI -->
+          <div id="recordingBar" class="recording-bar hidden">
+            <span class="recording-dot"></span>
+            <span id="recordingTime">0:00</span>
+            <span class="recording-label" id="recordingLabel">Запись голоса…</span>
+            <button id="recordCancel" class="btn">Отмена</button>
+            <button id="recordSend" class="btn btn-primary">Отправить</button>
+          </div>
+          <!-- Video preview -->
+          <div id="videoPreviewBar" class="video-preview-bar hidden">
+            <video id="videoPreview" muted autoplay playsinline></video>
+            <span id="videoRecTime">0:00</span>
+            <button id="videoCancel" class="btn">Отмена</button>
+            <button id="videoSend" class="btn btn-primary">Отправить</button>
+          </div>
         </div>
       </div>
 
-      <!-- Всплывающие эмодзи -->
       <div id="emojiFloats" class="emoji-floats"></div>
     </section>
   </div>
+
+  <input id="nameInput" type="hidden" value="" />
 
   <script src="multi.js"></script>
 </body>

@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#1b2a4a" />
   <title>Города — выбор режима</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.json" />
 </head>
 <body>
   <div class="app app--menu">
@@ -13,6 +14,9 @@
       <div class="brand">
         <span class="logo">🏙️</span>
         <h1>Города</h1>
+      </div>
+      <div class="controls">
+        <button id="themeBtn" class="conn-btn" title="Тема">🌙</button>
       </div>
     </header>
 
@@ -35,8 +39,45 @@
         </div>
       </a>
 
+      <div class="stats-card" id="statsCard">
+        <h3>Ваша статистика</h3>
+        <div class="stats-grid">
+          <div><span class="stat-label">🎮 Игр</span><b id="iGames">0</b></div>
+          <div><span class="stat-label">🏆 Побед</span><b id="iWins">0</b></div>
+          <div><span class="stat-label">🔥 Макс. серия</span><b id="iMaxStreak">0</b></div>
+          <div><span class="stat-label">📊 Процент</span><b id="iWinRate">0%</b></div>
+        </div>
+      </div>
+
       <p class="menu-foot">Полностью на русском. Работает на телефоне и компьютере.</p>
     </main>
   </div>
+
+  <script>
+    // Тема
+    (function () {
+      const btn = document.getElementById("themeBtn");
+      const saved = localStorage.getItem("cities:theme") || "dark";
+      document.documentElement.dataset.theme = saved;
+      btn.textContent = saved === "dark" ? "🌙" : "☀️";
+      btn.addEventListener("click", () => {
+        const cur = document.documentElement.dataset.theme || "dark";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem("cities:theme", next);
+        btn.textContent = next === "dark" ? "🌙" : "☀️";
+      });
+    })();
+
+    // Статистика
+    (function () {
+      const stats = JSON.parse(localStorage.getItem("cities:stats") || '{"games":0,"wins":0,"maxStreak":0,"streak":0}');
+      document.getElementById("iGames").textContent = stats.games;
+      document.getElementById("iWins").textContent = stats.wins;
+      document.getElementById("iMaxStreak").textContent = stats.maxStreak;
+      const rate = stats.games > 0 ? Math.round((stats.wins / stats.games) * 100) : 0;
+      document.getElementById("iWinRate").textContent = rate + "%";
+    })();
+  </script>
 </body>
 </html>

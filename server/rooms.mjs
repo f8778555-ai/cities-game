@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { has, canonical, norm, byLetter } from "./cities_db.mjs";
 import { lastPlayableLetter } from "./rules.mjs";
 
-const MAX_PLAYERS_CAP = 8;
+const MAX_PLAYERS_CAP = 32;
 const MIN_PLAYERS = 2;
 const CODE_LEN = 4;
 const EMPTY_ROOM_TTL_MS = 10 * 60 * 1000;
@@ -23,15 +23,12 @@ export class RoomManager {
     /** @type {Map<string, Room>} */
     this.rooms = new Map();
     this._listeners = new Set();
-    this._timerCallbacks = new Set(); // {roomCode, fn} для таймеров
     setInterval(() => this._sweep(), 30_000).unref?.();
   }
 
   onLobbyChange(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }
   notifyLobby() { this._emitLobbyChange(); }
   _emitLobbyChange() { for (const fn of this._listeners) try { fn(); } catch {} }
-
-  onTimerTick(fn) { this._timerCallbacks.add(fn); }
 
   _uniqueCode() {
     for (let i = 0; i < 10; i++) {
@@ -55,7 +52,7 @@ export class RoomManager {
     this._emitLobbyChange();
   }
 
-  createRoom({ hostName, maxPlayers, isPrivate, password, turnTimer, hints, disconnectTimeout, totalRounds }) {
+  createRoom({ hostName, maxPlayers, isPrivate, password, turnTimer, hints, disconnectTimeout }) {
     const capacity = Math.min(MAX_PLAYERS_CAP, Math.max(MIN_PLAYERS, Number(maxPlayers) || 2));
     const room = new Room({
       code: this._uniqueCode(),
@@ -63,10 +60,9 @@ export class RoomManager {
       maxPlayers: capacity,
       isPrivate: Boolean(isPrivate),
       password: isPrivate ? String(password || "").slice(0, 32) : "",
-      turnTimer: Number(turnTimer) || 0, // 0 = без таймера, иначе секунды
+      turnTimer: Number(turnTimer) || 0,
       hints: Boolean(hints),
-      disconnectTimeout: Number(disconnectTimeout) || 0, // 0 = бесконечно
-      totalRounds: Math.max(1, Math.min(21, Number(totalRounds) || 1)),
+      disconnectTimeout: Number(disconnectTimeout) || 0,
     });
     this.rooms.set(room.code, room);
     this._emitLobbyChange();
@@ -85,8 +81,6 @@ export class RoomManager {
         status: r.status,
         turnTimer: r.turnTimer,
         hints: r.hints,
-        totalRounds: r.totalRounds,
-        currentRound: r.currentRound,
       });
     }
     return list.sort((a, b) => a.status === "waiting" ? -1 : 1);
@@ -97,7 +91,7 @@ export class RoomManager {
 }
 
 export class Room {
-  constructor({ code, hostName, maxPlayers, isPrivate, password, turnTimer, hints, disconnectTimeout, totalRounds }) {
+  constructor({ code, hostName, maxPlayers, isPrivate, password, turnTimer, hints, disconnectTimeout }) {
     this.code = code;
     this.hostName = hostName;
     this.maxPlayers = maxPlayers;
@@ -106,19 +100,18 @@ export class Room {
     this.turnTimer = turnTimer;
     this.hints = hints;
     this.disconnectTimeout = disconnectTimeout;
-    this.totalRounds = totalRounds || 1; // всего партий в серии
-    this.currentRound = 0; // 0 = не начато, 1..totalRounds
-    /** @type {Map<string, number>} id -> wins (победы в сериии) */
-    this.seriesWins = new Map();
     /** @type {Map<string, Player>} */
     this.players = new Map();
+    /** @type {Set<string>} */
+    this.kickedIds = new Set();
+    /** @type {Array} chat log (media messages too) */
+    this.chatLog = [];
     this.history = [];
     this.used = new Set();
     this.lastLetter = null;
     this.currentPlayerId = null;
-    this.status = "waiting"; // waiting | playing | finished (серия завершена) | roundEnd (партия завершена, ждём следующую)
-    this.winnerId = null; // победитель текущей партии
-    this.seriesWinnerId = null; // победитель серии
+    this.status = "waiting";
+    this.winnerId = null;
     this.endReason = "";
     this.lastActivityAt = Date.now();
     this.createdAt = Date.now();
@@ -128,6 +121,10 @@ export class Room {
     this._onTimerExpire = null;
     this._disconnectTimers = new Map();
     this.hintGiven = false;
+    // Auto-start countdown
+    this.autoStartDeadline = null; // timestamp, когда партия стартует автоматически
+    this._autoStartTimer = null;
+    this._onAutoStart = null; // callback для автостарта
   }
 
   touch() { this.lastActivityAt = Date.now(); }
@@ -139,29 +136,35 @@ export class Room {
 
   isFull() { return this.players.size >= this.maxPlayers; }
 
-  addPlayer({ id, name }) {
+  isKicked(id) { return this.kickedIds.has(id); }
+
+  addPlayer({ id, name, avatar, color }) {
     const existing = this.players.get(id);
     if (existing) {
       existing.connected = true;
       existing.name = name;
+      if (avatar) existing.avatar = avatar;
+      if (color) existing.color = color;
       this._clearDisconnectTimer(id);
       this.touch();
+      this._checkAutoStart();
       return existing;
     }
     const player = {
       id,
       name: String(name || "Игрок").slice(0, 24),
+      avatar: String(avatar || "🙂").slice(0, 4),
+      color: String(color || "#6ea8ff").slice(0, 16),
       score: 0,
       isHost: this.players.size === 0,
       connected: true,
     };
     this.players.set(id, player);
-    if (!this.seriesWins.has(id)) this.seriesWins.set(id, 0);
     this.touch();
+    this._checkAutoStart();
     return player;
   }
 
-  /** Пометить игрока как отключённого (не удалять). */
   disconnectPlayer(id) {
     const p = this.players.get(id);
     if (!p) return;
@@ -169,25 +172,28 @@ export class Room {
     this.touch();
 
     if (this.status === "playing") {
-      if (this.disconnectTimeout > 0) {
-        // Запустить таймер ожидания
-        this._startDisconnectTimer(id);
+      // Игра продолжается — передаём ход если был у него
+      if (this.currentPlayerId === id) {
+        this._advanceTurn();
+        this._restartTurnTimer();
       }
-      // Если это текущий ходящий и нет бесконечного ожидания — пропустить ход
-      if (this.currentPlayerId === id && this.disconnectTimeout > 0) {
-        // Таймер дисконнекта обработает
+      // Если остался 1 живой — победа
+      const connectedCount = this._connectedCount();
+      if (connectedCount < 2) {
+        const connected = Array.from(this.players.values()).find(x => x.connected);
+        if (connected) {
+          this._finish(connected.id, "Остальные вышли.");
+        }
       }
-    }
-
-    // Если все отключились — не удаляем комнату, ждём
-    if (this.status === "waiting") {
-      // В ожидании — удалить игрока
+    } else if (this.status === "waiting") {
+      // В ожидании — удаляем
       this.players.delete(id);
       if (p.isHost && this.players.size > 0) {
         const next = this.players.values().next().value;
         next.isHost = true;
         this.hostName = next.name;
       }
+      this._checkAutoStart();
     }
   }
 
@@ -202,7 +208,6 @@ export class Room {
       this.hostName = next.name;
     }
     if (this.status === "playing" && this._connectedCount() < 2) {
-      // Все ушли кроме одного
       const connected = Array.from(this.players.values()).find(x => x.connected);
       if (connected) {
         this._finish(connected.id, `${p.name} покинул игру.`);
@@ -214,6 +219,7 @@ export class Room {
       this._advanceTurn();
       this._restartTurnTimer();
     }
+    if (this.status === "waiting") this._checkAutoStart();
     this.touch();
   }
 
@@ -225,9 +231,8 @@ export class Room {
 
   _startDisconnectTimer(id) {
     this._clearDisconnectTimer(id);
-    if (this.disconnectTimeout <= 0) return; // бесконечно
+    if (this.disconnectTimeout <= 0) return;
     const timer = setTimeout(() => {
-      // Время вышло — удалить игрока
       this.removePlayer(id);
       if (this._onTimerExpire) this._onTimerExpire("disconnect", id);
     }, this.disconnectTimeout * 1000);
@@ -240,24 +245,120 @@ export class Room {
     if (t) { clearTimeout(t); this._disconnectTimers.delete(id); }
   }
 
+  /** Проверить, нужно ли запустить авто-старт или начать партию сразу. */
+  _checkAutoStart() {
+    if (this.status !== "waiting") return;
+    const count = this.players.size;
+    const cap = this.maxPlayers;
+
+    // Все собрались — стартуем немедленно
+    if (count >= cap && count >= MIN_PLAYERS) {
+      this._cancelAutoStart();
+      // Найдём хоста для старта
+      const host = Array.from(this.players.values()).find(p => p.isHost);
+      if (host) {
+        this.status = "playing";
+        const ids = Array.from(this.players.keys());
+        this.currentPlayerId = ids[Math.floor(Math.random() * ids.length)];
+        this.lastLetter = null;
+        this.used = new Set();
+        this.history = [];
+        this.winnerId = null;
+        this.endReason = "";
+        this.hintGiven = false;
+        for (const p of this.players.values()) p.score = 0;
+        this._restartTurnTimer();
+        if (this._onAutoStart) this._onAutoStart("full");
+      }
+      return;
+    }
+
+    // Больше половины собралось — запускаем обратный отсчёт (60 сек)
+    const halfPlus = Math.floor(cap / 2) + 1;
+    if (count >= halfPlus && count >= MIN_PLAYERS) {
+      if (!this.autoStartDeadline) {
+        this._startAutoStart(60);
+      }
+    } else {
+      // Упали ниже половины — отменяем
+      this._cancelAutoStart();
+    }
+  }
+
+  _startAutoStart(seconds) {
+    this._cancelAutoStart();
+    this.autoStartDeadline = Date.now() + seconds * 1000;
+    this._autoStartTimer = setTimeout(() => {
+      this._autoStartTimer = null;
+      this.autoStartDeadline = null;
+      if (this.status !== "waiting") return;
+      if (this.players.size < MIN_PLAYERS) return;
+      // Автостарт
+      this.status = "playing";
+      const ids = Array.from(this.players.keys());
+      this.currentPlayerId = ids[Math.floor(Math.random() * ids.length)];
+      this.lastLetter = null;
+      this.used = new Set();
+      this.history = [];
+      this.winnerId = null;
+      this.endReason = "";
+      this.hintGiven = false;
+      for (const p of this.players.values()) p.score = 0;
+      this._restartTurnTimer();
+      if (this._onAutoStart) this._onAutoStart("timer");
+    }, seconds * 1000);
+    this._autoStartTimer.unref?.();
+  }
+
+  _cancelAutoStart() {
+    if (this._autoStartTimer) { clearTimeout(this._autoStartTimer); this._autoStartTimer = null; }
+    this.autoStartDeadline = null;
+  }
+
+  /** Хост продлевает время ожидания на N секунд. */
+  extendAutoStart(hostId, seconds) {
+    const host = this.players.get(hostId);
+    if (!host || !host.isHost) return { error: "Только хост может продлить ожидание." };
+    if (this.status !== "waiting") return { error: "Игра уже началась." };
+    seconds = Math.max(10, Math.min(300, Number(seconds) || 60));
+    if (this.autoStartDeadline) {
+      this.autoStartDeadline += seconds * 1000;
+      // Перезапускаем таймер с новым временем
+      if (this._autoStartTimer) clearTimeout(this._autoStartTimer);
+      const msLeft = this.autoStartDeadline - Date.now();
+      this._autoStartTimer = setTimeout(() => {
+        this._autoStartTimer = null;
+        this.autoStartDeadline = null;
+        if (this.status !== "waiting") return;
+        if (this.players.size < MIN_PLAYERS) return;
+        this.status = "playing";
+        const ids = Array.from(this.players.keys());
+        this.currentPlayerId = ids[Math.floor(Math.random() * ids.length)];
+        this.lastLetter = null;
+        this.used = new Set();
+        this.history = [];
+        this.winnerId = null;
+        this.endReason = "";
+        this.hintGiven = false;
+        for (const p of this.players.values()) p.score = 0;
+        this._restartTurnTimer();
+        if (this._onAutoStart) this._onAutoStart("timer");
+      }, Math.max(0, msLeft));
+      this._autoStartTimer.unref?.();
+    } else {
+      // Ещё не запущен — запустим на seconds
+      this._startAutoStart(seconds);
+    }
+    this.touch();
+    return { ok: true };
+  }
+
   start(byPlayerId) {
     if (this.status !== "waiting") return { error: "Игра уже запущена." };
     const starter = this.players.get(byPlayerId);
     if (!starter || !starter.isHost) return { error: "Начать может только хост." };
     if (this.players.size < MIN_PLAYERS) return { error: "Нужно минимум 2 игрока." };
-    // Сброс серии
-    this.seriesWins = new Map();
-    for (const id of this.players.keys()) this.seriesWins.set(id, 0);
-    this.currentRound = 0;
-    this.seriesWinnerId = null;
-    this._startRound();
-    this.touch();
-    return { ok: true };
-  }
-
-  /** Начать следующую партию в серии. */
-  _startRound() {
-    this.currentRound++;
+    this._cancelAutoStart();
     this.status = "playing";
     const ids = Array.from(this.players.keys());
     this.currentPlayerId = ids[Math.floor(Math.random() * ids.length)];
@@ -268,33 +369,38 @@ export class Room {
     this.endReason = "";
     this.hintGiven = false;
     for (const p of this.players.values()) p.score = 0;
+    this.touch();
     this._restartTurnTimer();
-  }
-
-  /** Начать следующую партию (по команде хоста). */
-  nextRound(byPlayerId) {
-    if (this.status !== "roundEnd") return { error: "Партия ещё не завершена." };
-    const starter = this.players.get(byPlayerId);
-    if (!starter || !starter.isHost) return { error: "Начать может только хост." };
-    if (this.currentRound >= this.totalRounds) return { error: "Серия завершена." };
-    this._startRound();
-    this.touch();
     return { ok: true };
   }
 
-  /** Реванш — начать новую серию. */
   rematch(byPlayerId) {
-    if (this.status !== "finished") return { error: "Серия ещё не завершена." };
+    if (this.status !== "finished") return { error: "Игра ещё не завершена." };
     const starter = this.players.get(byPlayerId);
     if (!starter || !starter.isHost) return { error: "Начать может только хост." };
-    // Сброс серии
-    this.seriesWins = new Map();
-    for (const id of this.players.keys()) this.seriesWins.set(id, 0);
-    this.currentRound = 0;
-    this.seriesWinnerId = null;
-    this._startRound();
+    for (const p of this.players.values()) p.score = 0;
+    this.status = "playing";
+    const ids = Array.from(this.players.keys());
+    this.currentPlayerId = ids[Math.floor(Math.random() * ids.length)];
+    this.lastLetter = null;
+    this.used = new Set();
+    this.history = [];
+    this.winnerId = null;
+    this.endReason = "";
+    this.hintGiven = false;
     this.touch();
+    this._restartTurnTimer();
     return { ok: true };
+  }
+
+  kickPlayer(hostId, targetId) {
+    const host = this.players.get(hostId);
+    if (!host || !host.isHost) return { error: "Только хост может исключать." };
+    if (hostId === targetId) return { error: "Нельзя исключить самого себя." };
+    const target = this.players.get(targetId);
+    if (!target) return { error: "Игрок не найден." };
+    this.kickedIds.add(targetId);
+    return { ok: true, targetName: target.name };
   }
 
   playMove(playerId, rawCity) {
@@ -335,7 +441,6 @@ export class Room {
     return { ok: true };
   }
 
-  /** Получить подсказку — первые 2 буквы случайного подходящего города. */
   getHint() {
     if (!this.hints || !this.lastLetter) return null;
     const available = byLetter(this.lastLetter).filter(n => !this.used.has(n));
@@ -343,9 +448,7 @@ export class Room {
     const pick = available[Math.floor(Math.random() * available.length)];
     const display = canonical(pick) || pick;
     this.hintGiven = true;
-    // Показать первые 2 буквы + длину
-    const hint = display.slice(0, 2) + "…" + ` (${display.length} букв)`;
-    return hint;
+    return display.slice(0, 2) + "…" + ` (${display.length} букв)`;
   }
 
   surrender(playerId) {
@@ -363,13 +466,12 @@ export class Room {
     const ids = Array.from(this.players.keys());
     if (ids.length === 0) return;
     const idx = ids.indexOf(this.currentPlayerId);
-    // Пропускаем отключённых (если disconnectTimeout = 0, не пропускаем)
     let next = (idx + 1) % ids.length;
     let attempts = 0;
     while (attempts < ids.length) {
       const p = this.players.get(ids[next]);
       if (p && p.connected) break;
-      if (this.disconnectTimeout === 0) break; // бесконечное ожидание — не пропускаем
+      if (this.disconnectTimeout === 0) break;
       next = (next + 1) % ids.length;
       attempts++;
     }
@@ -382,7 +484,6 @@ export class Room {
     this.turnStartedAt = Date.now();
     this.turnDeadline = this.turnStartedAt + this.turnTimer * 1000;
     this._timerInterval = setTimeout(() => {
-      // Время вышло — текущий игрок проигрывает
       const p = this.players.get(this.currentPlayerId);
       if (p && this.status === "playing") {
         const others = Array.from(this.players.values()).filter(x => x.id !== this.currentPlayerId);
@@ -402,33 +503,10 @@ export class Room {
   }
 
   _finish(winnerId, reason) {
-    // Записываем победу в серии
-    if (winnerId) {
-      const wins = (this.seriesWins.get(winnerId) || 0) + 1;
-      this.seriesWins.set(winnerId, wins);
-    }
+    this.status = "finished";
     this.winnerId = winnerId;
     this.endReason = reason;
     this.clearTimer();
-
-    // Проверяем, завершена ли серия
-    const maxWins = Math.max(...this.seriesWins.values(), 0);
-    const winsToClinch = Math.ceil(this.totalRounds / 2); // Чтобы выиграть серию из N нужно >N/2 побед (но не больше N)
-    const allRoundsPlayed = this.currentRound >= this.totalRounds;
-
-    if (maxWins >= winsToClinch && this.totalRounds > 1 || allRoundsPlayed || this.totalRounds === 1) {
-      // Серия завершена
-      // Найдём победителя серии (с наибольшим числом побед)
-      let best = null, bestWins = -1;
-      for (const [id, wins] of this.seriesWins) {
-        if (wins > bestWins) { bestWins = wins; best = id; }
-      }
-      this.seriesWinnerId = best;
-      this.status = "finished";
-    } else {
-      // Ещё есть партии — ждём следующую
-      this.status = "roundEnd";
-    }
   }
 
   snapshot() {
@@ -441,18 +519,16 @@ export class Room {
       currentPlayerId: this.currentPlayerId,
       lastLetter: this.lastLetter,
       winnerId: this.winnerId,
-      seriesWinnerId: this.seriesWinnerId,
       endReason: this.endReason,
       turnTimer: this.turnTimer,
       turnDeadline: this.turnDeadline,
       hints: this.hints,
       hintGiven: this.hintGiven,
       disconnectTimeout: this.disconnectTimeout,
-      totalRounds: this.totalRounds,
-      currentRound: this.currentRound,
+      autoStartDeadline: this.autoStartDeadline,
       players: Array.from(this.players.values()).map((p) => ({
         id: p.id, name: p.name, score: p.score, isHost: p.isHost, connected: p.connected,
-        seriesWins: this.seriesWins.get(p.id) || 0,
+        avatar: p.avatar || "🙂", color: p.color || "#6ea8ff",
       })),
       history: this.history,
     };
